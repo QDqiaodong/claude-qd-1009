@@ -133,8 +133,14 @@ onMounted(load)
       <el-form :model="form" label-width="100px" class="dialog-form">
         <el-form-item label="包厢">
           <el-select v-model="form.roomId" filterable placeholder="选择包厢">
-            <el-option v-for="r in rooms" :key="r.id" :label="`${r.roomCode} ${r.roomName}（${r.capacity}人）`" :value="r.id" />
+            <el-option v-for="r in rooms" :key="r.id"
+                       :label="`${r.roomCode} ${r.roomName}（${r.capacity}人）${r.cleaningStatus ? ' · 清场未验收' : r.status !== '空闲' ? ' · ' + r.status : ''}`"
+                       :value="r.id"
+                       :disabled="r.status === '待清场' || !!r.cleaningStatus" />
           </el-select>
+          <div style="font-size:12px;color:#8a7780;line-height:1.4">
+            清场未验收放行的包厢不可安排新场次；「使用中 / 预订」包厢可预订未来不冲突时段
+          </div>
         </el-form-item>
         <el-form-item label="会员">
           <el-select v-model="form.memberId" filterable placeholder="选择会员">

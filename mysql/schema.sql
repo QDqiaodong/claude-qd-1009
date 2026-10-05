@@ -16,6 +16,8 @@ CREATE DATABASE IF NOT EXISTS karaoke_lounge
 USE karaoke_lounge;
 
 SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS cleaning_task_log;
+DROP TABLE IF EXISTS cleaning_task;
 DROP TABLE IF EXISTS consumption;
 DROP TABLE IF EXISTS booking;
 DROP TABLE IF EXISTS song;
@@ -30,7 +32,7 @@ CREATE TABLE room (
     room_name  VARCHAR(64)  NOT NULL,
     capacity   INT          NOT NULL COMMENT '可容纳人数',
     min_spend  DECIMAL(10,2) NOT NULL COMMENT '最低消费（元）',
-    status     VARCHAR(16)  NOT NULL COMMENT '空闲/预订/使用中'
+    status     VARCHAR(16)  NOT NULL COMMENT '空闲/预订/使用中/待清场'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------- 预订 ----------------
@@ -75,6 +77,44 @@ CREATE TABLE song (
     duration_sec INT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ---------------- 清场任务（包厢清场交接与验收放行闭环） ----------------
+-- 状态机：待领取 → 清场中 → 待验收 → 已放行（终态）；验收退回 → 整改中 → 重新提交 → 待验收。
+-- 包厢存在未闭环（非“已放行”）任务期间一律不可接待。
+CREATE TABLE cleaning_task (
+    id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+    room_id           BIGINT      NOT NULL,
+    booking_id        BIGINT      NULL COMMENT '关联的场次（可空：无预订开台）',
+    status            VARCHAR(16) NOT NULL COMMENT '待领取/清场中/待验收/整改中/已放行',
+    cleaner_name      VARCHAR(32) NULL COMMENT '保洁负责人（领取人）',
+    claimed_at        DATETIME    NULL COMMENT '领取时间',
+    hygiene_result    VARCHAR(16) NULL COMMENT '卫生结果：合格/不合格',
+    leftover_items    VARCHAR(255) NULL COMMENT '遗留物记录',
+    device_issue      VARCHAR(255) NULL COMMENT '设备异常描述（麦克风/点歌屏等）',
+    device_resolution VARCHAR(255) NULL COMMENT '设备异常处置结果或经理停用结论',
+    last_return_reason VARCHAR(255) NULL COMMENT '最近一次验收退回原因',
+    return_count      INT         NOT NULL DEFAULT 0 COMMENT '被退回整改次数',
+    submitted_at      DATETIME    NULL COMMENT '最近一次提交时间',
+    finished_at       DATETIME    NULL COMMENT '验收放行时间',
+    created_at        DATETIME    NOT NULL,
+    updated_at        DATETIME    NOT NULL,
+    CONSTRAINT fk_cleaning_room FOREIGN KEY (room_id) REFERENCES room (id),
+    CONSTRAINT fk_cleaning_booking FOREIGN KEY (booking_id) REFERENCES booking (id),
+    INDEX idx_cleaning_room_status (room_id, status),
+    INDEX idx_cleaning_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------- 清场交接历史（每次操作留痕，退回整改时前次问题与处理记录全部保留） ----------------
+CREATE TABLE cleaning_task_log (
+    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+    task_id    BIGINT      NOT NULL,
+    action     VARCHAR(16) NOT NULL COMMENT '生成任务/领取/提交清场/验收放行/退回整改/异常处置',
+    operator   VARCHAR(32) NOT NULL COMMENT '操作人',
+    detail     VARCHAR(500) NULL,
+    created_at DATETIME    NOT NULL,
+    CONSTRAINT fk_cleaning_log_task FOREIGN KEY (task_id) REFERENCES cleaning_task (id),
+    INDEX idx_cleaning_log_task (task_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- =====================================================================
 -- 种子数据
 -- =====================================================================
@@ -84,8 +124,8 @@ INSERT INTO room (room_code, room_name, capacity, min_spend, status) VALUES
 ('K02', '小包',     4,  388.00, '预订'),
 ('K03', '中包',     8,  688.00, '使用中'),
 ('K04', '豪华中包', 10, 888.00, '空闲'),
-('K05', '大包',     12, 988.00, '空闲'),
-('K06', 'VIP大包',  20, 1888.00, '空闲');
+('K05', '大包',     12, 988.00, '待清场'),
+('K06', 'VIP大包',  20, 1888.00, '待清场');
 
 INSERT INTO member (member_no, member_name, phone, level, balance) VALUES
 ('M001', '张伟', '13800001111', '普通', 200.00),
@@ -110,3 +150,52 @@ INSERT INTO consumption (booking_id, item_name, amount, at) VALUES
 (4, '欢唱套餐', 500.00, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY),
 (4, '精酿啤酒', 88.00,  UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY),
 (4, '缤纷果盘', 68.00,  UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY);
+
+-- ---------------- 清场任务种子 ----------------
+-- 任务1：K01 迷你包 历史已放行（booking 4 已完成场次的清场闭环，供包厢详情追溯演示）
+INSERT INTO cleaning_task
+(id, room_id, booking_id, status, cleaner_name, claimed_at, hygiene_result, leftover_items,
+ device_issue, device_resolution, last_return_reason, return_count, submitted_at, finished_at, created_at, updated_at)
+VALUES
+(1, 1, 4, '已放行', '王保洁', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 26 HOUR,
+ '合格', '无', NULL, NULL, NULL, 0,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 25 HOUR,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 25 HOUR + INTERVAL 20 MINUTE,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 26 HOUR,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 25 HOUR + INTERVAL 20 MINUTE);
+
+-- 任务2：K05 大包 整改中（被退回一次：遗留物未登记上交，前次问题与处理记录保留在日志）
+INSERT INTO cleaning_task
+(id, room_id, booking_id, status, cleaner_name, claimed_at, hygiene_result, leftover_items,
+ device_issue, device_resolution, last_return_reason, return_count, submitted_at, finished_at, created_at, updated_at)
+VALUES
+(2, 5, NULL, '整改中', '李保洁', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 90 MINUTE,
+ '合格', '客人遗留黑色双肩包一个', NULL, NULL,
+ '遗留背包未登记上交前台，退回整改：登记遗留物去向并重新提交', 1,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 60 MINUTE, NULL,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 HOUR,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 40 MINUTE);
+
+-- 任务3：K06 VIP大包 待验收（卫生合格但麦克风异常未处置 —— 演示“设备异常不得直接放行”）
+INSERT INTO cleaning_task
+(id, room_id, booking_id, status, cleaner_name, claimed_at, hygiene_result, leftover_items,
+ device_issue, device_resolution, last_return_reason, return_count, submitted_at, finished_at, created_at, updated_at)
+VALUES
+(3, 6, NULL, '待验收', '王保洁', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 50 MINUTE,
+ '合格', '无', '2号麦克风无声，疑似电池仓接触不良', NULL, NULL, 0,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 20 MINUTE, NULL,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 HOUR,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 20 MINUTE);
+
+INSERT INTO cleaning_task_log (task_id, action, operator, detail, created_at) VALUES
+(1, '生成任务', '前台-小周', '场次结束，生成待清场任务', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 26 HOUR),
+(1, '领取', '王保洁', '保洁领取任务，开始清场', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 26 HOUR + INTERVAL 5 MINUTE),
+(1, '提交清场', '王保洁', '卫生：合格；遗留物：无；设备异常：无', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 25 HOUR),
+(1, '验收放行', '经理-老赵', '验收合格，包厢放行恢复接待', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 25 HOUR + INTERVAL 20 MINUTE),
+(2, '生成任务', '前台-小周', '场次结束，生成待清场任务', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 HOUR),
+(2, '领取', '李保洁', '保洁领取任务，开始清场', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 90 MINUTE),
+(2, '提交清场', '李保洁', '卫生：合格；遗留物：客人遗留黑色双肩包一个；设备异常：无', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 60 MINUTE),
+(2, '退回整改', '经理-老赵', '退回原因：遗留背包未登记上交前台，退回整改：登记遗留物去向并重新提交；上次提交[卫生：合格；遗留物：客人遗留黑色双肩包一个；设备异常：无]', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 40 MINUTE),
+(3, '生成任务', '前台-小周', '场次结束，生成待清场任务', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 HOUR),
+(3, '领取', '王保洁', '保洁领取任务，开始清场', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 50 MINUTE),
+(3, '提交清场', '王保洁', '卫生：合格；遗留物：无；设备异常：2号麦克风无声，疑似电池仓接触不良', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 20 MINUTE);

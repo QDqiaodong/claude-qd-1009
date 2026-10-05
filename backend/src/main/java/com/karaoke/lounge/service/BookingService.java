@@ -10,6 +10,7 @@ import com.karaoke.lounge.common.Dict;
 import com.karaoke.lounge.entity.Booking;
 import com.karaoke.lounge.entity.Room;
 import com.karaoke.lounge.repository.BookingRepository;
+import com.karaoke.lounge.repository.CleaningTaskRepository;
 import com.karaoke.lounge.repository.RoomRepository;
 
 /**
@@ -18,17 +19,21 @@ import com.karaoke.lounge.repository.RoomRepository;
  * <p>核心规则（reject 分支）：
  * ① 预订人数不得超过包厢容量；
  * ② 预订时段必须整体落在营业窗口（11:00–次日 02:00）内；
- * ③ 同一包厢的预订不得时间重叠（已取消的预订不冲突）。</p>
+ * ③ 同一包厢的预订不得时间重叠（已取消的预订不冲突）；
+ * ④ 清场未验收放行的包厢不得安排新场次（未闭环清场任务期间一律不可订）。</p>
  */
 @Service
 public class BookingService {
 
     private final BookingRepository bookingRepository;
     private final RoomRepository roomRepository;
+    private final CleaningTaskRepository cleaningTaskRepository;
 
-    public BookingService(BookingRepository bookingRepository, RoomRepository roomRepository) {
+    public BookingService(BookingRepository bookingRepository, RoomRepository roomRepository,
+                          CleaningTaskRepository cleaningTaskRepository) {
         this.bookingRepository = bookingRepository;
         this.roomRepository = roomRepository;
+        this.cleaningTaskRepository = cleaningTaskRepository;
     }
 
     @Transactional(readOnly = true)
@@ -74,6 +79,12 @@ public class BookingService {
             throw new BizException("预订时段须整体落在营业时段（"
                     + Dict.OPEN_HOUR + ":00–次日 " + Dict.CLOSE_HOUR + ":00）内，且结束须晚于开始");
         }
+        // 规则④：清场未验收放行的包厢不得安排新场次（双保险：房态 + 未闭环任务）
+        if ("待清场".equals(room.getStatus())
+                || !cleaningTaskRepository.findByRoom_IdAndStatusNot(room.getId(), Dict.CLEAN_RELEASED).isEmpty()) {
+            throw new BizException("包厢 " + room.getRoomName()
+                    + " 清场未验收放行，暂不可安排新场次；请先在清场管理完成验收");
+        }
         // 规则③：不与同包厢其它有效预订重叠
         List<Booking> others = bookingRepository.findByRoom_IdAndStatusNot(room.getId(), "已取消");
         for (Booking b : others) {
@@ -98,7 +109,7 @@ public class BookingService {
         return bookingRepository.save(booking);
     }
 
-    /** 取消预订；若该包厢再无有效预订则回置为空闲 */
+    /** 取消预订；若该包厢再无有效预订且清场已闭环则回置为空闲 */
     @Transactional
     public Booking cancel(Long id) {
         Booking booking = get(id);
@@ -109,7 +120,9 @@ public class BookingService {
         Booking saved = bookingRepository.save(booking);
         Room room = booking.getRoom();
         boolean stillActive = !bookingRepository.findByRoom_IdAndStatusNot(room.getId(), "已取消").isEmpty();
-        if (!stillActive) {
+        boolean cleaningOpen = !cleaningTaskRepository
+                .findByRoom_IdAndStatusNot(room.getId(), Dict.CLEAN_RELEASED).isEmpty();
+        if (!stillActive && !cleaningOpen && !"待清场".equals(room.getStatus())) {
             room.setStatus("空闲");
             roomRepository.save(room);
         }

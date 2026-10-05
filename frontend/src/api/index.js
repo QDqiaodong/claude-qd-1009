@@ -28,6 +28,18 @@ export default {
   createRoom: (d) => call(http.post('/rooms', d)),
   updateRoomStatus: (id, target) =>
     call(http.put(`/rooms/${id}/status`, null, params({ target }))),
+  checkoutRoom: (id, operator) =>
+    call(http.post(`/rooms/${id}/checkout`, null, params({ operator }))),
+  listRoomCleaningTasks: (id) => call(http.get(`/rooms/${id}/cleaning-tasks`)),
+
+  // ---------------- 清场交接 ----------------
+  listCleaningTasks: (p) => call(http.get('/cleaning-tasks', params(p))),
+  getCleaningTask: (id) => call(http.get(`/cleaning-tasks/${id}`)),
+  claimCleaningTask: (id, operator) =>
+    call(http.post(`/cleaning-tasks/${id}/claim`, null, params({ operator }))),
+  submitCleaningTask: (id, d) => call(http.post(`/cleaning-tasks/${id}/submit`, d)),
+  resolveDeviceIssue: (id, d) => call(http.post(`/cleaning-tasks/${id}/device-resolve`, d)),
+  reviewCleaningTask: (id, d) => call(http.post(`/cleaning-tasks/${id}/review`, d)),
 
   // ---------------- 预订 ----------------
   listBookings: (p) => call(http.get('/bookings', params(p))),

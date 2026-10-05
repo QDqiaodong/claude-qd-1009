@@ -15,13 +15,15 @@ public final class Dict {
     private Dict() {
     }
 
-    // ---------------- 包厢状态：空闲 → 预订 → 使用中 → 空闲 ----------------
-    public static final List<String> ROOM_STATUSES = List.of("空闲", "预订", "使用中");
+    // ---------------- 包厢状态：空闲 → 预订 → 使用中 → 待清场 → 空闲 ----------------
+    // 「待清场」：场次结束已生成清场任务，未经验收放行不得恢复接待。
+    public static final List<String> ROOM_STATUSES = List.of("空闲", "预订", "使用中", "待清场");
 
     private static final Map<String, String> ROOM_STATUS_NAME = Map.of(
             "空闲", "空闲可订",
             "预订", "已被预订",
-            "使用中", "正在使用");
+            "使用中", "正在使用",
+            "待清场", "清场未验收，暂停接待");
 
     // ---------------- 预订状态 ----------------
     public static final List<String> BOOKING_STATUSES = List.of("已预订", "已完成", "已取消");
@@ -30,6 +32,35 @@ public final class Dict {
             "已预订", "已预订待到店",
             "已完成", "已消费结账",
             "已取消", "已取消");
+
+    // ---------------- 清场任务状态 ----------------
+    /** 待领取 → 清场中 → 待验收 → 已放行；验收退回 → 整改中 → 重新提交 → 待验收 */
+    public static final List<String> CLEANING_STATUSES =
+            List.of("待领取", "清场中", "待验收", "整改中", "已放行");
+
+    public static final String CLEAN_PENDING_CLAIM = "待领取";
+    public static final String CLEAN_CLEANING = "清场中";
+    public static final String CLEAN_PENDING_REVIEW = "待验收";
+    public static final String CLEAN_RECTIFYING = "整改中";
+    public static final String CLEAN_RELEASED = "已放行";
+
+    private static final Map<String, String> CLEANING_STATUS_NAME = Map.of(
+            "待领取", "待保洁领取",
+            "清场中", "保洁清场中",
+            "待验收", "待经理验收",
+            "整改中", "退回整改中",
+            "已放行", "已验收放行");
+
+    // ---------------- 清场卫生结果 ----------------
+    public static final List<String> HYGIENE_RESULTS = List.of("合格", "不合格");
+
+    // ---------------- 清场交接日志动作 ----------------
+    public static final String LOG_CREATE = "生成任务";
+    public static final String LOG_CLAIM = "领取";
+    public static final String LOG_SUBMIT = "提交清场";
+    public static final String LOG_REVIEW_PASS = "验收放行";
+    public static final String LOG_REVIEW_RETURN = "退回整改";
+    public static final String LOG_DEVICE_RESOLVE = "异常处置";
 
     // ---------------- 会员等级 ----------------
     public static final List<String> MEMBER_LEVELS = List.of("普通", "银卡", "金卡", "钻石");
@@ -75,6 +106,18 @@ public final class Dict {
 
     public static String bookingStatusName(String status) {
         return status == null ? "" : BOOKING_STATUS_NAME.getOrDefault(status, status);
+    }
+
+    public static boolean isValidCleaningStatus(String status) {
+        return status != null && CLEANING_STATUS_NAME.containsKey(status);
+    }
+
+    public static String cleaningStatusName(String status) {
+        return status == null ? "" : CLEANING_STATUS_NAME.getOrDefault(status, status);
+    }
+
+    public static boolean isValidHygieneResult(String result) {
+        return result != null && HYGIENE_RESULTS.contains(result);
     }
 
     public static boolean isValidMemberLevel(String level) {

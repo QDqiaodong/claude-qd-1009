@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import api from '../api'
 
 const props = defineProps({ filter: Object })
+const emit = defineEmits(['goto-cleaning'])
 
 const rows = ref([])
 const error = ref('')
@@ -11,17 +12,32 @@ const loading = ref(false)
 const statusFilter = ref('')
 const dialog = ref(false)
 const saving = ref(false)
-const statuses = ['空闲', '预订', '使用中']
+const statuses = ['空闲', '预订', '使用中', '待清场']
+
+// 散场清场弹窗
+const checkoutDialog = ref(false)
+const checkoutTarget = ref(null)
+const checkoutOperator = ref(localStorage.getItem('cleaning-operator') || '')
+
+// 包厢详情抽屉（含清场交接记录追溯）
+const drawer = ref(false)
+const detail = ref(null)
+const detailTasks = ref([])
+const detailLoading = ref(false)
 
 const form = ref(blank())
 function blank() {
   return { roomCode: '', roomName: '', capacity: '', minSpend: '', status: '空闲' }
 }
 
+// 推荐：容量达标 且 当前可接待（空闲且无未闭环清场任务）
 const recommendedSet = computed(() => {
   const ps = (props.filter && props.filter.partySize) || 1
-  return new Set(rows.value.filter(r => r.capacity >= ps).map(r => r.id))
+  return new Set(rows.value.filter(r => r.capacity >= ps && r.available).map(r => r.id))
 })
+
+const filteredRows = computed(() =>
+  statusFilter.value ? rows.value.filter(r => r.status === statusFilter.value) : rows.value)
 
 async function load() {
   loading.value = true; error.value = ''
@@ -53,7 +69,50 @@ async function changeStatus(row, target) {
     await api.updateRoomStatus(row.id, target)
     tip.value = `${row.roomName} 已置为「${target}」`
     await load()
-  } catch (e) { error.value = e.message }
+  } catch (e) { error.value = e.message; await load() }
+}
+
+// ---------------- 散场清场 ----------------
+function openCheckout(row) {
+  checkoutTarget.value = row
+  checkoutDialog.value = true
+  error.value = ''; tip.value = ''
+}
+
+async function doCheckout() {
+  const row = checkoutTarget.value
+  saving.value = true; error.value = ''
+  try {
+    await api.checkoutRoom(row.id, checkoutOperator.value.trim() || '前台')
+    tip.value = `${row.roomName} 已散场，清场任务已生成；验收放行前暂停接待`
+    checkoutDialog.value = false
+    await load()
+  } catch (e) { error.value = e.message; await load() } finally { saving.value = false }
+}
+
+// ---------------- 详情追溯 ----------------
+async function openDetail(row) {
+  drawer.value = true
+  detail.value = row
+  detailTasks.value = []
+  detailLoading.value = true
+  try {
+    detailTasks.value = (await api.listRoomCleaningTasks(row.id)) || []
+  } catch (e) { error.value = e.message } finally { detailLoading.value = false }
+}
+
+function cleaningTagType(status) {
+  return {
+    待领取: 'info', 清场中: 'warning', 待验收: 'primary',
+    整改中: 'danger', 已放行: 'success'
+  }[status] || 'info'
+}
+
+function logTagType(action) {
+  return {
+    生成任务: 'info', 领取: 'warning', 提交清场: 'primary',
+    验收放行: 'success', 退回整改: 'danger', 异常处置: 'warning'
+  }[action] || 'info'
 }
 
 onMounted(load)
@@ -64,7 +123,7 @@ onMounted(load)
     <div class="panel">
       <div class="panel-head">
         <span class="panel-title">包厢 · 房态与容量</span>
-        <span class="panel-desc">刻度尺选定 {{ filter?.partySize || 1 }} 人，容量达标包厢标「推荐」</span>
+        <span class="panel-desc">刻度尺选定 {{ filter?.partySize || 1 }} 人，容量达标且可接待的包厢标「推荐」；待清场包厢验收放行前不可订</span>
       </div>
 
       <div v-if="error" class="err">{{ error }}</div>
@@ -75,17 +134,19 @@ onMounted(load)
         <div class="stat"><div class="k">空闲</div><div class="v">{{ rows.filter(r => r.status === '空闲').length }}</div></div>
         <div class="stat"><div class="k">预订</div><div class="v">{{ rows.filter(r => r.status === '预订').length }}</div></div>
         <div class="stat"><div class="k">使用中</div><div class="v">{{ rows.filter(r => r.status === '使用中').length }}</div></div>
+        <div class="stat"><div class="k">待清场</div><div class="v">{{ rows.filter(r => r.status === '待清场').length }}</div></div>
+        <div class="stat"><div class="k">可接待</div><div class="v">{{ rows.filter(r => r.available).length }}</div></div>
       </div>
 
       <div class="toolbar">
-        <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px" @change="load">
+        <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px">
           <el-option v-for="s in statuses" :key="s" :label="s" :value="s" />
         </el-select>
         <span class="spacer"></span>
         <el-button type="primary" @click="openCreate">新建包厢</el-button>
       </div>
 
-      <el-table :data="rows" v-loading="loading" border stripe>
+      <el-table :data="filteredRows" v-loading="loading" border stripe>
         <el-table-column prop="roomCode" label="编号" width="90" />
         <el-table-column prop="roomName" label="名称" min-width="110" />
         <el-table-column prop="capacity" label="容量(人)" width="90" />
@@ -101,13 +162,31 @@ onMounted(load)
         </el-table-column>
         <el-table-column prop="status" label="状态" width="90">
           <template #default="{ row }">
-            <el-tag :type="row.status === '空闲' ? 'success' : row.status === '使用中' ? 'danger' : 'warning'">{{ row.status }}</el-tag>
+            <el-tag :type="row.status === '空闲' ? 'success' : row.status === '使用中' ? 'danger' : row.status === '待清场' ? 'info' : 'warning'">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="清场" width="90">
           <template #default="{ row }">
-            <el-button size="small" :disabled="row.status === '空闲'" @click="changeStatus(row, '空闲')">置空闲</el-button>
-            <el-button size="small" type="warning" plain :disabled="row.status === '使用中'" @click="changeStatus(row, '使用中')">置使用中</el-button>
+            <el-tag v-if="row.cleaningStatus" :type="cleaningTagType(row.cleaningStatus)">{{ row.cleaningStatus }}</el-tag>
+            <span v-else style="color:#bbb">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="可接待" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="row.available" type="success">可接待</el-tag>
+            <el-tag v-else type="info">暂停</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="300" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="row.status === '使用中'" size="small" type="danger" plain
+                       @click="openCheckout(row)">散场清场</el-button>
+            <el-button v-if="row.status === '待清场'" size="small" type="warning" plain
+                       @click="emit('goto-cleaning')">去清场管理</el-button>
+            <el-button size="small" type="warning" plain
+                       :disabled="row.status === '使用中' || row.status === '待清场'"
+                       @click="changeStatus(row, '使用中')">置使用中</el-button>
+            <el-button size="small" @click="openDetail(row)">详情</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -121,7 +200,7 @@ onMounted(load)
         <el-form-item label="最低消费(元)"><el-input v-model="form.minSpend" type="number" :min="0" step="1" /></el-form-item>
         <el-form-item label="状态" class="full">
           <el-radio-group v-model="form.status">
-            <el-radio v-for="s in statuses" :key="s" :value="s">{{ s }}</el-radio>
+            <el-radio v-for="s in ['空闲', '预订', '使用中']" :key="s" :value="s">{{ s }}</el-radio>
           </el-radio-group>
         </el-form-item>
       </el-form>
@@ -130,5 +209,78 @@ onMounted(load)
         <el-button type="primary" :loading="saving" @click="save">建档</el-button>
       </template>
     </el-dialog>
+
+    <!-- 散场清场确认 -->
+    <el-dialog v-model="checkoutDialog" :title="`散场清场 · ${checkoutTarget?.roomName || ''}`" width="480px">
+      <el-alert type="warning" :closable="false" style="margin-bottom: 12px"
+                title="散场后将生成待清场任务，包厢转入「待清场」；验收放行前不对外显示可用、不可安排新场次。" />
+      <el-form label-width="90px">
+        <el-form-item label="操作人">
+          <el-input v-model="checkoutOperator" placeholder="前台操作人姓名" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="checkoutDialog = false">取消</el-button>
+        <el-button type="danger" :loading="saving" @click="doCheckout">确认散场，生成清场任务</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 包厢详情：预订 + 清场交接记录追溯 -->
+    <el-drawer v-model="drawer" :title="detail ? `${detail.roomCode} ${detail.roomName} · 详情` : ''" size="500px">
+      <template v-if="detail">
+        <el-descriptions :column="2" border size="small">
+          <el-descriptions-item label="状态">
+            <el-tag :type="detail.status === '空闲' ? 'success' : detail.status === '使用中' ? 'danger' : detail.status === '待清场' ? 'info' : 'warning'">{{ detail.status }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="可接待">
+            <el-tag :type="detail.available ? 'success' : 'info'">{{ detail.available ? '可接待' : '暂停' }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="容量">{{ detail.capacity }} 人</el-descriptions-item>
+          <el-descriptions-item label="最低消费">{{ detail.minSpend }} 元</el-descriptions-item>
+        </el-descriptions>
+
+        <div style="margin: 16px 0 8px; font-weight: 800; color: var(--primary-deep)">清场交接记录</div>
+        <div v-loading="detailLoading">
+          <el-empty v-if="!detailTasks.length" description="暂无清场任务" :image-size="60" />
+          <div v-for="t in detailTasks" :key="t.id" class="trace-card">
+            <div class="trace-head">
+              <el-tag size="small" :type="cleaningTagType(t.status)">{{ t.status }}</el-tag>
+              <span class="trace-title">任务 #{{ t.id }}</span>
+              <span class="trace-sub">负责人：{{ t.cleanerName || '待领取' }}</span>
+              <span v-if="t.returnCount" class="trace-sub" style="color:#c0392b">退回 {{ t.returnCount }} 次</span>
+            </div>
+            <el-timeline style="margin-top: 10px; padding-left: 4px">
+              <el-timeline-item v-for="log in t.logs" :key="log.id"
+                                :timestamp="`${log.createdAt} · ${log.operator}`"
+                                :type="logTagType(log.action)">
+                <el-tag size="small" :type="logTagType(log.action)" style="margin-right: 6px">{{ log.action }}</el-tag>
+                <span style="font-size: 13px">{{ log.detail }}</span>
+              </el-timeline-item>
+            </el-timeline>
+          </div>
+        </div>
+
+        <div style="margin: 16px 0 8px; font-weight: 800; color: var(--primary-deep)">预订记录</div>
+        <el-table :data="detail.bookings || []" size="small" border>
+          <el-table-column prop="id" label="ID" width="60" />
+          <el-table-column prop="startAt" label="开始" min-width="140" />
+          <el-table-column prop="endAt" label="结束" min-width="140" />
+          <el-table-column prop="status" label="状态" width="80" />
+        </el-table>
+      </template>
+    </el-drawer>
   </div>
 </template>
+
+<style scoped>
+.trace-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: #fff;
+}
+.trace-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.trace-title { font-weight: 800; }
+.trace-sub { font-size: 12px; color: var(--muted); }
+</style>

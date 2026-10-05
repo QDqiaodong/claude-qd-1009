@@ -7,6 +7,7 @@ import BookingView from '../views/BookingView.vue'
 import ConsumptionView from '../views/ConsumptionView.vue'
 import MemberView from '../views/MemberView.vue'
 import SongView from '../views/SongView.vue'
+import CleaningView from '../views/CleaningView.vue'
 
 const routes = [
   { path: '/', redirect: '/rooms' },
@@ -15,6 +16,7 @@ const routes = [
   { path: '/consumptions', name: 'consumptions', component: ConsumptionView },
   { path: '/members', name: 'members', component: MemberView },
   { path: '/songs', name: 'songs', component: SongView },
+  { path: '/cleaning', name: 'cleaning', component: CleaningView },
   { path: '/:pathMatch(.*)*', redirect: '/rooms' }
 ]
 
