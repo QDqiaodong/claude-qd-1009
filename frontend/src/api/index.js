@@ -28,6 +28,8 @@ export default {
   createRoom: (d) => call(http.post('/rooms', d)),
   updateRoomStatus: (id, target) =>
     call(http.put(`/rooms/${id}/status`, null, params({ target }))),
+  finishRoom: (id, operator) =>
+    call(http.post(`/rooms/${id}/finish`, null, params({ operator }))),
 
   // ---------------- 预订 ----------------
   listBookings: (p) => call(http.get('/bookings', params(p))),
@@ -48,5 +50,20 @@ export default {
 
   // ---------------- 歌曲 ----------------
   listSongs: (p) => call(http.get('/songs', params(p))),
-  createSong: (d) => call(http.post('/songs', d))
+  createSong: (d) => call(http.post('/songs', d)),
+
+  // ---------------- 清场交接与验收放行 ----------------
+  listCleaningTasks: (p) => call(http.get('/cleaning-tasks', params(p))),
+  getCleaningTask: (id) => call(http.get(`/cleaning-tasks/${id}`)),
+  claimCleaningTask: (id, operator) =>
+    call(http.post(`/cleaning-tasks/${id}/claim`, null, params({ operator }))),
+  submitCleaningTask: (id, d) => call(http.post(`/cleaning-tasks/${id}/submit`, d)),
+  acceptCleaningTask: (id, manager, note) =>
+    call(http.post(`/cleaning-tasks/${id}/accept`, null, params({ manager, note }))),
+  returnCleaningTask: (id, manager, note) =>
+    call(http.post(`/cleaning-tasks/${id}/return`, null, params({ manager, note }))),
+  resolveCleaningIssue: (id, operator, note) =>
+    call(http.post(`/cleaning-tasks/${id}/resolve-issue`, null, params({ operator, note }))),
+  decommissionCleaningTask: (id, manager, conclusion) =>
+    call(http.post(`/cleaning-tasks/${id}/decommission`, null, params({ manager, conclusion })))
 }

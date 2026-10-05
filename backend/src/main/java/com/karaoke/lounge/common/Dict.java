@@ -15,13 +15,42 @@ public final class Dict {
     private Dict() {
     }
 
-    // ---------------- 包厢状态：空闲 → 预订 → 使用中 → 空闲 ----------------
-    public static final List<String> ROOM_STATUSES = List.of("空闲", "预订", "使用中");
+    // ---------------- 包厢状态 ----------------
+    // 闭环流转：空闲 → 预订 → 使用中 →【结束使用】→ 待清场 →【验收放行】→ 空闲；
+    // 停用为旁路（设备异常停用结论 / 人工停用），恢复后回到空闲。
+    //
+    // 取舍说明：在「及时释放包厢供下一场使用」与「未验收不得对外显示可用」之间，
+    // 本系统明确选择后者 —— 待清场（清场任务未闭环）与停用的包厢一律不可预订、
+    // 不对外显示空闲；宁可让下一场等验收，也不让未验收的包厢被排出去。
+    public static final List<String> ROOM_STATUSES = List.of("空闲", "预订", "使用中", "待清场", "停用");
 
     private static final Map<String, String> ROOM_STATUS_NAME = Map.of(
             "空闲", "空闲可订",
             "预订", "已被预订",
-            "使用中", "正在使用");
+            "使用中", "正在使用",
+            "待清场", "清场未验收",
+            "停用", "停用维修");
+
+    // ---------------- 清场任务状态 ----------------
+    // 待领取 → 清洁中 → 待验收 →（验收放行）已放行 /（退回整改）整改中 → 再提交回待验收；
+    // 设备异常未处置时不得放行，须先异常处置或由经理作停用结论（→ 已停用）。
+    public static final List<String> CLEANING_STATUSES =
+            List.of("待领取", "清洁中", "待验收", "整改中", "已放行", "已停用");
+
+    /** 未闭环（仍占用包厢可用性）的清场状态 */
+    public static final List<String> CLEANING_OPEN_STATUSES =
+            List.of("待领取", "清洁中", "待验收", "整改中");
+
+    private static final Map<String, String> CLEANING_STATUS_NAME = Map.of(
+            "待领取", "待保洁领取",
+            "清洁中", "保洁清场中",
+            "待验收", "待经理验收",
+            "整改中", "退回整改中",
+            "已放行", "验收合格已放行",
+            "已停用", "设备异常停用");
+
+    // ---------------- 卫生结果 ----------------
+    public static final List<String> HYGIENE_RESULTS = List.of("合格", "不合格");
 
     // ---------------- 预订状态 ----------------
     public static final List<String> BOOKING_STATUSES = List.of("已预订", "已完成", "已取消");
@@ -75,6 +104,18 @@ public final class Dict {
 
     public static String bookingStatusName(String status) {
         return status == null ? "" : BOOKING_STATUS_NAME.getOrDefault(status, status);
+    }
+
+    public static boolean isValidCleaningStatus(String status) {
+        return status != null && CLEANING_STATUS_NAME.containsKey(status);
+    }
+
+    public static String cleaningStatusName(String status) {
+        return status == null ? "" : CLEANING_STATUS_NAME.getOrDefault(status, status);
+    }
+
+    public static boolean isValidHygieneResult(String result) {
+        return result != null && HYGIENE_RESULTS.contains(result);
     }
 
     public static boolean isValidMemberLevel(String level) {

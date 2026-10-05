@@ -12,7 +12,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.karaoke.lounge.common.ApiResponse;
+import com.karaoke.lounge.entity.CleaningTask;
 import com.karaoke.lounge.entity.Room;
+import com.karaoke.lounge.service.CleaningTaskService;
 import com.karaoke.lounge.service.RoomService;
 
 /** 包厢接口 */
@@ -21,9 +23,11 @@ import com.karaoke.lounge.service.RoomService;
 public class RoomController {
 
     private final RoomService roomService;
+    private final CleaningTaskService cleaningTaskService;
 
-    public RoomController(RoomService roomService) {
+    public RoomController(RoomService roomService, CleaningTaskService cleaningTaskService) {
         this.roomService = roomService;
+        this.cleaningTaskService = cleaningTaskService;
     }
 
     @GetMapping
@@ -50,5 +54,13 @@ public class RoomController {
     @PutMapping("/{id}/status")
     public ApiResponse<Room> updateStatus(@PathVariable Long id, @RequestParam String target) {
         return ApiResponse.success("包厢状态已更新", roomService.updateStatus(id, target));
+    }
+
+    /** 结束使用：包厢 使用中 → 待清场，生成待领取的清场任务（闭环入口） */
+    @PostMapping("/{id}/finish")
+    public ApiResponse<CleaningTask> finish(@PathVariable Long id,
+                                            @RequestParam(required = false) String operator) {
+        return ApiResponse.success("已结束使用并生成待清场任务，验收放行前不可接待",
+                cleaningTaskService.finishSession(id, operator));
     }
 }

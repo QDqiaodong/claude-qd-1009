@@ -17,4 +17,7 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     List<Booking> findByRoom_IdAndStatusNot(Long roomId, String status);
 
     List<Booking> findByRoom_IdAndStatus(Long roomId, String status);
+
+    /** 该包厢最近一场未取消的预订（结束使用生成清场任务时关联场次用） */
+    Booking findTopByRoom_IdAndStatusNotOrderByEndAtDesc(Long roomId, String status);
 }

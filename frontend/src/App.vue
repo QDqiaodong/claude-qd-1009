@@ -8,6 +8,7 @@ import BookingView from './views/BookingView.vue'
 import ConsumptionView from './views/ConsumptionView.vue'
 import MemberView from './views/MemberView.vue'
 import SongView from './views/SongView.vue'
+import CleaningView from './views/CleaningView.vue'
 
 // ------------------------------------------------------------------
 // 导航形态：顶部「刻度尺滑块」。一条横贯的刻度尺上拖动两个把手选定预订时间窗，
@@ -20,7 +21,8 @@ const viewMap = {
   '/bookings': BookingView,
   '/consumptions': ConsumptionView,
   '/members': MemberView,
-  '/songs': SongView
+  '/songs': SongView,
+  '/cleaning': CleaningView
 }
 
 const tabs = [
@@ -28,11 +30,12 @@ const tabs = [
   { path: '/bookings', label: '预订', sub: '时段 · 人数 · 冲突' },
   { path: '/consumptions', label: '消费', sub: '挂单 · 结账开单' },
   { path: '/members', label: '会员', sub: '等级 · 预存' },
-  { path: '/songs', label: '歌曲', sub: '语种 · 时长' }
+  { path: '/songs', label: '歌曲', sub: '语种 · 时长' },
+  { path: '/cleaning', label: '清场', sub: '保洁 · 验收 · 整改' }
 ]
 
 const currentPath = ref(router.currentRoute.value.path)
-const counts = ref({ rooms: 0, bookings: 0, consumptions: 0, members: 0, songs: 0 })
+const counts = ref({ rooms: 0, bookings: 0, consumptions: 0, members: 0, songs: 0, cleaning: 0 })
 
 // 刻度尺滑块状态
 const partySize = ref(4)
@@ -50,11 +53,11 @@ const currentView = computed(() => viewMap[currentPath.value] || RoomView)
 
 async function loadCounts() {
   try {
-    const [r, b, c, m, s] = await Promise.all([
+    const [r, b, c, m, s, cl] = await Promise.all([
       api.listRooms(), api.listBookings(), api.listConsumptions(),
-      api.listMembers(), api.listSongs()
+      api.listMembers(), api.listSongs(), api.listCleaningTasks()
     ])
-    counts.value = { rooms: r.length, bookings: b.length, consumptions: c.length, members: m.length, songs: s.length }
+    counts.value = { rooms: r.length, bookings: b.length, consumptions: c.length, members: m.length, songs: s.length, cleaning: cl.length }
   } catch (e) { /* 计数失败不影响主流程 */ }
 }
 
@@ -81,7 +84,7 @@ onMounted(async () => {
       <div class="brand">
         <span class="brand-mark">K</span>
         <div class="brand-text">
-          <div class="brand-title">KTV 包厢运营 · 预订 / 消费 / 会员 / 歌曲</div>
+          <div class="brand-title">KTV 包厢运营 · 预订 / 消费 / 会员 / 歌曲 / 清场</div>
           <div class="brand-sub">刻度尺选时段与人数，一键筛选可订包厢</div>
         </div>
       </div>

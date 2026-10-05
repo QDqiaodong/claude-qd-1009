@@ -133,7 +133,9 @@ onMounted(load)
       <el-form :model="form" label-width="100px" class="dialog-form">
         <el-form-item label="包厢">
           <el-select v-model="form.roomId" filterable placeholder="选择包厢">
-            <el-option v-for="r in rooms" :key="r.id" :label="`${r.roomCode} ${r.roomName}（${r.capacity}人）`" :value="r.id" />
+            <el-option v-for="r in rooms" :key="r.id"
+              :label="`${r.roomCode} ${r.roomName}（${r.capacity}人）${['待清场', '停用'].includes(r.status) ? ' · ' + r.status + '不可订' : ''}`"
+              :value="r.id" :disabled="['待清场', '停用'].includes(r.status)" />
           </el-select>
         </el-form-item>
         <el-form-item label="会员">
